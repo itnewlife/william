@@ -1,0 +1,212 @@
+import datetime
+import os
+import pandas as pd
+import numpy as np
+
+def SP_read(path):
+    # 搜索词报告
+    df1 = pd.read_excel(path, sheet_name='Sponsored Product Search Term R')
+
+    return [df1]
+#设置目录
+
+path='/Users/blobeats/Desktop/搜索词报告分析'
+
+def process_search_term_report(path):
+    """
+    读取指定路径的搜索词报告Excel文件，按广告组合名称分组，
+    并为每个组合名称生成一个以“广告组合名称搜索词报告.xlsx”为文件名的Excel文件。
+    """
+    try:
+        df = pd.read_excel(path)
+    except FileNotFoundError:
+        print(f"文件未找到: {path}")
+        return
+    except Exception as e:
+        print(f"读取文件时出错: {e}")
+        return
+
+    # 检查列名是否正确，这里假设正确的列名为"广告组合名称"
+    grouped = df.groupby('广告组合名称')
+
+    for name, group in grouped:
+        file_name = f"{name}SP-STR.xlsx".replace('/', '_').replace('\\', '_')
+        # 修改路径为动态路径
+        output_path = os.path.join('/Users/blobeats/Desktop/搜索词报告分析', file_name)
+        try:
+            group.to_excel(output_path, index=False)
+            print(f"文件已成功导出：{output_path}")
+        except Exception as e:
+            print(f"导出文件时出错: {e}")
+
+# 修改为实际的文件路径
+file_path = '/Users/blobeats/Desktop/搜索词报告分析/SP-STR.xlsx'
+process_search_term_report(file_path)
+def apply_acos_optimization_rules(row, avg_acos, avg_cpa, avg_cvr):
+
+    # 首先检查CVR是否为0
+    if row['7天的转化率'] == 0:
+        return "点击不出单", "CVR-0"
+
+    # 如果CVR不为0,则继续检查其他规则
+    if row['广告成本销售比(ACOS)'] > avg_acos:
+        if row['7天总订单数(#)'] < 3:
+            return "Decrease Bid by 0.04", "优化Acos"
+        elif 3 <= row['7天总订单数(#)'] < 5:
+            return "Decrease Bid by 0.02", "优化Acos"
+
+    if 1 / avg_cvr <= row['点击量'] < 1.5 * avg_cpa and row['7天总订单数(#)'] < 1:
+        return "Decrease Bid by 0.05", "优化Acos"
+
+    if 1.5 * avg_cpa <= row['点击量'] < 2 * avg_cpa and row['7天总订单数(#)'] < 1:
+        return "Decrease Bid by 0.1", "优化Acos"
+
+    if 2.5 * avg_cpa <= row['点击量'] and row['7天总订单数(#)'] < 1:
+        return "Pause", "优化Acos"
+
+    return "No Action Required", "N/A"
+
+def apply_sales_increase_rules(row, avg_acos, avg_cpa):
+    acos = row['广告成本销售比(ACOS)']
+    if row['广告成本销售比(ACOS)'] < 0.5 * avg_acos:
+        return "Increase Bid by 0.05", "提高销量"
+    if 0.5 * avg_acos <= row['广告成本销售比(ACOS)'] < avg_acos:
+        return "Increase Bid by 0.03", "提高销量"
+    if row['点击量'] < 0.5 * avg_cpa and row['7天总订单数(#)'] < 1:
+        return "Increase Bid by 0.03", "提高销量"
+    if 0.5 * avg_cpa <= row['点击量'] < avg_cpa and row['7天总订单数(#)'] < 1:
+        return "Decrease Bid by 0.02", "提高销量"
+    return "No Action Required", "N/A"
+
+def apply_keyword_optimization_rules(row, avg_cpa, total_orders, avg_exposures, avg_orders):
+    order = row['7天总订单数(#)']
+    cpa = row['CPA']
+    exposure = row['展示量']
+
+    # Rule 6: 1级优先级
+    if order < 0.5 * avg_orders and cpa > 1.5 * avg_cpa:
+        return "Decrease Bid by 0.05", "1级优先级"
+    # Rule 5: 2级优先级
+    elif 0.5 * avg_orders <= order < avg_orders and avg_cpa < cpa <= 1.2 * avg_cpa:
+        return "Decrease Bid by 0.02", "2级优先级"
+    # Rule 1: 3级优先级
+    elif order >= 1.5 * avg_orders and cpa < 0.5 * avg_cpa and exposure > avg_exposures:
+        return "Increase Bid by 0.05", "3级优先级"
+    # Rule 2: 4级优先级
+    elif 1.2 * avg_orders <= order < 1.5 * avg_orders and 0.5 * avg_cpa < cpa < 0.8 * avg_cpa and exposure > avg_exposures:
+        return "Increase Bid by 0.03", "4级优先级"
+    # Rule 4: 5级优先级
+    elif avg_orders <= order < 1.2 * avg_orders and 0.8 * avg_cpa < cpa < 0.5 * avg_cpa and exposure > avg_exposures:
+        return "Increase Bid by 0.02", "5级优先级"
+
+    return "No Action Required", "N/A"
+
+def apply_all_rules(row, avg_acos, avg_cpa, avg_cvr, avg_ctr, total_orders, total_exposures, avg_exposures, avg_orders):
+    acos_action = apply_acos_optimization_rules(row, avg_acos, avg_cpa, avg_cvr)
+    sales_action = apply_sales_increase_rules(row, avg_acos, avg_cpa)
+    keyword_action = apply_keyword_optimization_rules(row, avg_cpa, total_orders, total_exposures, avg_exposures)
+
+    for action in (acos_action, sales_action, keyword_action):
+        if action:
+            return action
+    return "No Action Required", "N/A"
+
+def get_sheet_name(file_path):
+    xlsx = pd.ExcelFile(file_path)
+    sheet_names = xlsx.sheet_names
+    if len(sheet_names) == 0:
+        raise ValueError(f"No worksheets found in the file: {file_path}")
+    return sheet_names[0]
+
+def main():
+    directory = '/Users/blobeats/Desktop/搜索词报告分析'
+    excluded_files = ['SP-STR.xlsx']
+    excel_files = [f for f in os.listdir(directory) if f.endswith('.xlsx') and f not in excluded_files]
+
+    for file_name in excel_files:
+        try:
+            original_file_path = os.path.join(directory, file_name)
+            sheet_name = get_sheet_name(original_file_path)
+            df = pd.read_excel(original_file_path, sheet_name=sheet_name)
+        except Exception as e:
+            print(f"Error reading file '{file_name}': {e}")
+            continue
+        current_date = datetime.datetime.now().strftime("%Y-%m-%d")
+
+        # 初始化全局指标
+        df['CPA'] = np.where(df['7天总订单数(#)'] == 0, np.nan, df['花费'] / df['7天总订单数(#)'])
+        total_exposures = df['展示量'].sum()
+        total_clicks = df['点击量'].sum()
+        total_sales = df['7天总销售额'].sum()
+        total_costs = df['花费'].sum()
+        total_orders = df['7天总订单数(#)'].sum()
+        avg_exposures = df['展示量'].mean()
+        avg_orders = total_orders / df.shape[0]
+
+        avg_acos = (total_costs / total_sales) if total_sales != 0 else 0
+        avg_cpa = total_costs / total_orders if total_orders != 0 else 0
+        avg_cvr = (total_orders / total_clicks) if total_clicks != 0 else 0
+        avg_ctr = (total_clicks / total_exposures) if total_exposures != 0 else 0
+
+        # 应用规则生成操作建议
+        df[['Action Corrected ACOS', 'Optimization Goal Corrected ACOS']] = df.apply(
+            lambda row: apply_acos_optimization_rules(row, avg_acos, avg_cpa, avg_cvr), axis=1, result_type="expand")
+
+        df[['Action Corrected Sales', 'Optimization Goal Corrected Sales']] = df.apply(
+            lambda row: apply_sales_increase_rules(row, avg_acos, avg_cpa), axis=1, result_type="expand")
+
+        df[['Action Corrected Keywords', 'Optimization Goal Corrected Keywords']] = df.apply(
+            lambda row: apply_keyword_optimization_rules(row, avg_cpa, total_orders, total_exposures, avg_exposures), axis=1,
+            result_type="expand")
+
+        def combine_recommendations(row):
+            recommendations = []
+            if pd.notnull(row['Action Corrected ACOS']):
+                recommendations.append(f"ACOS: {row['Action Corrected ACOS']} - {row['Optimization Goal Corrected ACOS']}")
+            if pd.notnull(row['Action Corrected Sales']):
+                recommendations.append(
+                    f"Sales: {row['Action Corrected Sales']} - {row['Optimization Goal Corrected Sales']}")
+            if pd.notnull(row['Action Corrected Keywords']):
+                recommendations.append(
+                    f"Keywords: {row['Action Corrected Keywords']} - {row['Optimization Goal Corrected Keywords']}")
+
+            return "; ".join(recommendations)
+
+        # 应用这个函数来创建一个包含所有建议的新列
+        df['Combined Recommendations'] = df.apply(combine_recommendations, axis=1)
+
+        # 汇总信息
+        summary_info = {
+            'Total Exposures': total_exposures,
+            'Total Clicks': total_clicks,
+            'Total Costs': total_costs,
+            'Total_sales': total_sales,
+            'Total_orders': total_orders,
+            'Average ACOS': avg_acos,
+            'Average CPA': avg_cpa,
+            'Average CVR': avg_cvr,
+            'Average CTR': avg_ctr,
+            'Average Exposures': avg_exposures
+        }
+        summary_df = pd.DataFrame([summary_info])
+
+        # 构建新文件名和输出路径
+        base_file_name = os.path.splitext(file_name)[0]
+        new_file_name = f"优化后{base_file_name}.xlsx"
+        output_path = os.path.join(directory, new_file_name)
+
+        try:
+            with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+                summary_df.to_excel(writer, sheet_name='Summary', index=False)
+                df.to_excel(writer, sheet_name='Detailed Recommendations', index=False)
+
+                # 为每个广告组名称生成对应的优化策略Sheet
+                for group_name, group_df in df.groupby('广告组名称'):
+                    group_df.to_excel(writer, sheet_name=group_name[:31], index=False)  # Sheet名长度限制
+
+            print(f"Report saved to {output_path}")
+        except Exception as e:
+            print(f"Error writing file '{new_file_name}': {e}")
+
+if __name__ == "__main__":
+    main()
